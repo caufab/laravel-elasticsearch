@@ -1,5 +1,5 @@
 {
-  "name": "pdphilip/elasticsearch",
+  "name": "caufab/laravel-elasticsearch",
   "description": "An Elasticsearch implementation of Laravel's Eloquent ORM",
   "keywords": [
     "laravel",
@@ -9,7 +9,7 @@
     "database",
     "model"
   ],
-  "homepage": "https://github.com/pdphilip/laravel-elasticsearch",
+  "homepage": "https://github.com/caufab/laravel-elasticsearch",
   "authors": [
     {
       "name": "David Philip",
