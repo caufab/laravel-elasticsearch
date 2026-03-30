@@ -4,6 +4,15 @@ namespace PDPhilip\Elasticsearch\Data;
 
 use Illuminate\Support\Arr;
 
+/**
+ * Per-model metadata.
+ *
+ * Manages two concerns:
+ * - Document metadata from ES responses (score, highlights, sort, cursor, index, docCount, bucket)
+ * - Table/index identity (table name, prefix, suffix for dynamic indices)
+ *
+ * Data flow: ES response → Processor → MetaDTO → ModelMeta (via setMeta)
+ */
 final class ModelMeta
 {
     protected string $recordIndex = '';
@@ -22,9 +31,9 @@ final class ModelMeta
 
     protected array $cursor = [];
 
-    protected ?int $docCount = null;
+    protected array $bucket = [];
 
-    //    public array $_query = []; //TBD
+    protected ?int $docCount = null;
 
     public function __construct($table, $tablePrefix)
     {
@@ -76,6 +85,11 @@ final class ModelMeta
         return $this->highlights ?? [];
     }
 
+    public function getValue($key): mixed
+    {
+        return $this->{$key} ?? null;
+    }
+
     public function getHighlight($column, $deliminator = ''): ?string
     {
         return implode($deliminator, Arr::get($this->highlights, $column));
@@ -107,16 +121,13 @@ final class ModelMeta
             'sort' => $this->sort,
             'cursor' => $this->cursor,
             'highlights' => $this->highlights,
+            'bucket' => $this->bucket,
         ];
     }
 
     // ----------------------------------------------------------------------
     // Setters
     // ----------------------------------------------------------------------
-    //    public function setId($id): void
-    //    {
-    //        $this->_id = $id;
-    //    }
 
     public function setTable($table): void
     {
@@ -134,6 +145,7 @@ final class ModelMeta
         $this->setCursor($meta->getCursor());
         $this->setSort($meta->getSort());
         $this->docCount = $meta->getDocCount();
+        $this->bucket = $meta->getBucket();
     }
 
     public function setSort(array $sort): void

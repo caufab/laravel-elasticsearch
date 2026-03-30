@@ -2,6 +2,8 @@
 
 namespace PDPhilip\Elasticsearch\Query\DSL;
 
+use PDPhilip\Elasticsearch\Utils\Helpers;
+
 class DslFactory
 {
     // ----------------------------------------------------------------------
@@ -17,6 +19,11 @@ class DslFactory
         }
 
         return ['index' => $operation];
+    }
+
+    public static function updateOperation(string $index, string $id, array $options = []): array
+    {
+        return ['update' => array_merge(['_index' => $index, '_id' => $id], $options)];
     }
 
     // ----------------------------------------------------------------------
@@ -131,18 +138,6 @@ class DslFactory
             ],
         ];
     }
-
-    //    public static function term(string $field, $value, array $options = []): array
-    //    {
-    //        return [
-    //            'term' => [
-    //                $field => array_merge(
-    //                    ['value' => (string) $value],
-    //                    $options
-    //                ),
-    //            ],
-    //        ];
-    //    }
 
     public static function multiMatch(string $value, array $options = []): array
     {
@@ -263,6 +258,21 @@ class DslFactory
             'function_score' => array_merge(
                 ['query' => $query],
                 [$functionType => $functionOptions],
+            ),
+        ];
+    }
+
+    public static function queryString(mixed $query, mixed $fields, array $options = [])
+    {
+        $payload['query'] = (string) $query;
+        if ($fields) {
+            $payload['fields'] = is_array($fields) ? $fields : [$fields];
+        }
+
+        return [
+            'query_string' => array_merge(
+                $payload,
+                $options
             ),
         ];
     }
@@ -421,13 +431,15 @@ class DslFactory
         ];
     }
 
-    public static function dateRange(array $args, array $options = []): array
+    public static function dateRange($field, array $ranges, array $options = []): array
     {
+        $payload = [];
+        $payload['field'] = $field;
+        $payload = [...$payload, ...$options];
+        $payload['ranges'] = Helpers::sanitizeRanges($ranges);
+
         return [
-            'date_range' => array_merge(
-                $args,
-                $options
-            ),
+            'date_range' => $payload,
         ];
     }
 
@@ -475,6 +487,18 @@ class DslFactory
                 ],
                 $options
             ),
+        ];
+    }
+
+    public static function rangeAggregation(string $field, array $ranges)
+    {
+        $ranges = Helpers::sanitizeRanges($ranges);
+
+        return [
+            'range' => [
+                'field' => $field,
+                'ranges' => $ranges,
+            ],
         ];
     }
 

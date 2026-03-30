@@ -36,7 +36,6 @@ it('tests insert', function () {
     $user->name = 'John Doe';
     $user->title = 'admin';
     $user->age = 35;
-
     $user->save();
 
     expect($user->exists)->toBeTrue()
@@ -108,7 +107,79 @@ it('tests upsert', function () {
     expect($result)->toBe(1)
         ->and(User::count())->toBe(2)
         ->and(User::where('email', 'foo')->first()->name)->toBe('bar3');
-})->todo();
+});
+
+it('upsert preserves fields not in update list', function () {
+    User::upsert([
+        ['email' => 'alice', 'name' => 'Alice', 'age' => 30, 'title' => 'admin'],
+    ], 'email');
+
+    // Update only name — age and title should remain
+    User::upsert([
+        ['email' => 'alice', 'name' => 'Alice Updated', 'age' => 99, 'title' => 'guest'],
+    ], 'email', ['name']);
+
+    $user = User::where('email', 'alice')->first();
+    expect($user->name)->toBe('Alice Updated')
+        ->and($user->age)->toBe(30)
+        ->and($user->title)->toBe('admin');
+});
+
+it('upsert mixed insert and update in one batch', function () {
+    User::create(['email' => 'bob', 'name' => 'Bob', 'age' => 25]);
+    User::create(['email' => 'charlie', 'name' => 'Charlie', 'age' => 40]);
+
+    // 2 existing + 1 new in one call
+    $result = User::upsert([
+        ['email' => 'bob', 'name' => 'Robert', 'age' => 26],
+        ['email' => 'charlie', 'name' => 'Charles', 'age' => 41],
+        ['email' => 'diana', 'name' => 'Diana', 'age' => 35],
+    ], 'email', ['name', 'age']);
+
+    expect($result)->toBe(3)
+        ->and(User::count())->toBe(3);
+
+    expect(User::where('email', 'bob')->first()->name)->toBe('Robert')
+        ->and(User::where('email', 'charlie')->first()->name)->toBe('Charles')
+        ->and(User::where('email', 'diana')->first()->name)->toBe('Diana');
+});
+
+it('upsert with multiple unique fields', function () {
+    User::upsert([
+        ['name' => 'Dave', 'title' => 'admin', 'age' => 50],
+        ['name' => 'Dave', 'title' => 'user', 'age' => 30],
+    ], ['name', 'title']);
+
+    expect(User::count())->toBe(2);
+
+    // Update age for one combo, insert a new combo
+    $result = User::upsert([
+        ['name' => 'Dave', 'title' => 'admin', 'age' => 55],
+        ['name' => 'Dave', 'title' => 'editor', 'age' => 40],
+    ], ['name', 'title'], ['age']);
+
+    expect($result)->toBe(2)
+        ->and(User::count())->toBe(3);
+
+    expect(User::where('title', 'admin')->first()->age)->toBe(55)
+        ->and(User::where('title', 'user')->first()->age)->toBe(30)
+        ->and(User::where('title', 'editor')->first()->age)->toBe(40);
+});
+
+it('upsert with null update updates all fields', function () {
+    User::upsert([
+        ['email' => 'eve', 'name' => 'Eve', 'age' => 20],
+    ], 'email');
+
+    // null update = update all columns
+    User::upsert([
+        ['email' => 'eve', 'name' => 'Eve Updated', 'age' => 21],
+    ], 'email', null);
+
+    $user = User::where('email', 'eve')->first();
+    expect($user->name)->toBe('Eve Updated')
+        ->and($user->age)->toBe(21);
+});
 
 it('tests manual string id', function () {
     $user = new User;
@@ -622,4 +693,67 @@ it('tests meta total hits', function () {
     $query = User::wherePhrasePrefix('name', 'User')->limit(10)->get();
     expect($query->getQueryMeta()->getTotalHits())->toBe(8500)
         ->and(count($query))->toBe(10);
+});
+
+it('tests fetched model serialization includes id', function () {
+    // Create a model without explicitly setting an id (ES generates it)
+    $user = User::create(['name' => 'John Doe', 'title' => 'admin']);
+    $originalId = $user->id;
+
+    // Fetch the model fresh from the database
+    $fetched = User::find($originalId);
+
+    // Verify both id and _id are accessible via accessor
+    expect($fetched->id)->toBe($originalId)
+        ->and($fetched->_id)->toBe($originalId);
+
+    // Verify toArray() includes 'id' but not '_id'
+    $array = $fetched->toArray();
+    expect($array)->toHaveKey('id')
+        ->and($array['id'])->toBe($originalId)
+        ->and($array)->not->toHaveKey('_id');
+
+    // Verify toJson() includes 'id' but not '_id'
+    $json = json_decode($fetched->toJson(), true);
+    expect($json)->toHaveKey('id')
+        ->and($json['id'])->toBe($originalId)
+        ->and($json)->not->toHaveKey('_id');
+
+    // Verify collection serialization also includes 'id'
+    $users = User::where('name', 'John Doe')->get();
+    $collectionArray = $users->toArray();
+    expect($collectionArray[0])->toHaveKey('id')
+        ->and($collectionArray[0]['id'])->toBe($originalId)
+        ->and($collectionArray[0])->not->toHaveKey('_id');
+});
+
+it('tests _id is still accessible for backwards compatibility', function () {
+    $user = User::create(['name' => 'Jane Doe']);
+    $originalId = $user->id;
+
+    $fetched = User::find($originalId);
+
+    // _id accessor should still work
+    expect($fetched->_id)->toBe($originalId);
+
+    // Raw attributes should have _id but NOT 'id' (id is only added during serialization)
+    $raw = $fetched->getAttributes();
+    expect($raw)->toHaveKey('_id')
+        ->and($raw['_id'])->toBe($originalId)
+        ->and($raw)->not->toHaveKey('id'); // 'id' should NOT be stored, only added in toArray()
+});
+
+it('propagates queryFieldMap to query builder', function () {
+    $user = new User;
+
+    // Verify queryFieldMap is passed to query builder as OPTION_MAPPING_MAP
+    $query = $user->newQuery()->getQuery();
+    $map = $query->options()->get(Model::OPTION_MAPPING_MAP);
+    expect($map)->toBe(['title' => 'title.keyword']);
+
+    // Verify it also works on instances created via newInstance (firstOrCreate, replicate, etc.)
+    $clone = $user->newInstance(['name' => 'Clone']);
+    $cloneQuery = $clone->newQuery()->getQuery();
+    $cloneMap = $cloneQuery->options()->get(Model::OPTION_MAPPING_MAP);
+    expect($cloneMap)->toBe(['title' => 'title.keyword']);
 });
